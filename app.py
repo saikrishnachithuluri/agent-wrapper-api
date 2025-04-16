@@ -1,58 +1,74 @@
-import json
 from fastapi import FastAPI, HTTPException
-import httpx
+from pydantic import BaseModel
+import requests
+import os
+from dotenv import load_dotenv
 
-# Initialize the FastAPI app
+
+load_dotenv()
+
 app = FastAPI()
 
-# Vapi API URL
-VAPI_API_URL = "https://api.vapi.ai/assistant"
+VAPI_API_KEY = os.getenv("VAPI_API_KEY")
+RETELL_API_KEY = os.getenv("RETELL_API_KEY")
 
-# Your Authorization Token for Vapi
-VAPI_AUTH_TOKEN = "<your_vapi_auth_token>"
+# Define the common input schema
+class AssistantRequest(BaseModel):
+    provider: str  # "vapi" or "retell"
+    name: str
+    voice_id: str
+    language: str = "en-US"
+    first_message: str
 
-# HTTP Client for making requests to Vapi API
-client = httpx.AsyncClient()
-
-# Function to create assistant on Vapi API
-async def create_vapi_assistant(payload: dict):
-    headers = {
-        "Authorization": f"Bearer {VAPI_AUTH_TOKEN}",
-        "Content-Type": "application/json",
-    }
-    response = await client.post(VAPI_API_URL, headers=headers, json=payload)
-
-    # Check if the request was successful
-    if response.status_code != 201:
-        raise HTTPException(
-            status_code=response.status_code,
-            detail=f"Error: {response.text}",
-        )
-    
-    return response.json()
-
-# Endpoint to create assistant
 @app.post("/create_assistant")
-async def create_assistant(data: dict):
-    """
-    Endpoint to create an assistant using the Vapi API.
-    :param data: The incoming data to create an assistant.
-    :return: JSON response from Vapi API.
-    """
-    
-    # Transform incoming data (you may add logic here for Retell AI-specific data)
-    assistant_payload = {
-        "name": data.get("name", "DefaultAssistant"),
-        "firstMessage": data.get("firstMessage", "Hello! How can I assist you today?"),
-        "firstMessageMode": data.get("firstMessageMode", "assistant-speaks-first"),
-        "voice": data.get("voice", {}),
-        "model": data.get("model", {}),
-        "transcriber": data.get("transcriber", {}),
-        "maxDurationSeconds": data.get("maxDurationSeconds", 600),
-        "silenceTimeoutSeconds": data.get("silenceTimeoutSeconds", 30)
+def create_assistant(data: AssistantRequest):
+    if data.provider == "vapi":
+        return create_vapi_assistant(data)
+    elif data.provider == "retell":
+        return create_retell_assistant(data)
+    else:
+        raise HTTPException(status_code=400, detail="Invalid provider. Must be 'vapi' or 'retell'.")
+
+def create_vapi_assistant(data: AssistantRequest):
+    url = "https://api.vapi.ai/assistant"
+    headers = {
+        "Authorization": f"Bearer {VAPI_API_KEY}",
+        "Content-Type": "application/json"
     }
+    payload = {
+        "name": data.name,
+        "voice": {
+            "provider": "11labs",
+            "voiceId": data.voice_id
+        },
+        "language": data.language,
+        "firstMessage": data.first_message,
+        "firstMessageMode": "assistant-speaks-first"
+    }
+    response = requests.post(url, json=payload, headers=headers)
+    if response.status_code == 201:
+        return response.json()
+    else:
+        raise HTTPException(status_code=response.status_code, detail=f"Vapi error: {response.text}")
 
-    # Make a request to Vapi to create the assistant
-    response = await create_vapi_assistant(assistant_payload)
-
-    return response
+def create_retell_assistant(data: AssistantRequest):
+    url = "https://api.retellai.com/agent"  # Replace with correct endpoint
+    headers = {
+        "Authorization": f"Bearer {RETELL_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "agent_name": data.name,
+        "response_engine": {
+            "type": "retell-llm",
+            "llm_id": "llm_234sdertfsdsfsdf"
+        },
+        "voice_id": data.voice_id,
+        "language": data.language,
+        "voicemail_message": data.first_message
+    }
+    response = requests.post(url, json=payload, headers=headers)
+    if response.status_code == 201:
+        return response.json()
+    else:
+        raise HTTPException(status_code=response.status_code, detail=f"Retell error: {response.text}")
